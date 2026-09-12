@@ -1,0 +1,20 @@
+[Unit]
+Description=One GPU training run
+After=local-fs.target
+RequiresMountsFor=/home/admin/gpu-job
+
+[Service]
+Type=oneshot
+User=admin
+WorkingDirectory=/home/admin/gpu-job
+ExecStart=/home/admin/gpu-job/run-job.sh --epochs 120 --pause 2
+TimeoutStartSec=infinity
+TimeoutStopSec=30s
+Restart=no
+UMask=0077
+Nice=10
+CPUWeight=20
+IOWeight=20
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
