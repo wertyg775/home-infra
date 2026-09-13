@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 
@@ -9,12 +10,14 @@ from torch import nn
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--output", type=Path, default=os.environ.get("GPU_JOB_OUTPUT_DIR"))
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--pause", type=float, default=2.0)
     args = parser.parse_args()
     if args.epochs < 1 or args.pause < 0:
         parser.error("epochs must be positive and pause must be nonnegative")
+    if args.output is None:
+        parser.error("Pass --output or submit through gpu-run")
     args.output.mkdir(parents=True, exist_ok=True)
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required; CPU fallback is disabled")
