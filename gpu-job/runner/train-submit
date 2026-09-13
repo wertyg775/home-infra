@@ -1,0 +1,201 @@
+#!/usr/bin/python3
+"""Fetch a committed uv project, prepare it, and run it through gpu-run."""
+import argparse
+from datetime import datetime, timezone
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tomllib
+import uuid
+
+ROOT = Path.home() / '.local/state/train-submit'
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def save(path, data):
+    temporary = path.with_suffix('.tmp')
+    temporary.write_text(json.dumps(data, indent=2) + '\n')
+    temporary.replace(path)
+
+
+def inside(project, relative):
+    relative = Path(relative)
+    if relative.is_absolute() or '..' in relative.parts:
+        raise ValueError('Config and project paths must stay inside the checkout')
+    path = project / relative
+    if not path.resolve().is_relative_to(project.resolve()):
+        raise ValueError('Symlink points outside the checkout')
+    if not path.is_file():
+        raise ValueError(f'Required project file missing: {relative}')
+    return path
+
+
+def contract(project, filename):
+    for name in ('pyproject.toml', 'uv.lock', '.python-version'):
+        inside(project, name)
+    pin = (project / '.python-version').read_text().strip()
+    if not re.fullmatch(r'3\.13\.[0-9]+', pin):
+        raise ValueError('.python-version must pin an exact Python 3.13 patch, e.g. 3.13.7')
+    data = tomllib.loads(inside(project, filename).read_text())
+    if set(data) - {'command', 'env'}:
+        raise ValueError('train-job.toml supports only command and env')
+    command = data.get('command')
+    if not isinstance(command, list) or not command or not all(
+            isinstance(arg, str) and '\0' not in arg for arg in command):
+        raise ValueError('command must be a nonempty array of string arguments')
+    executable = Path(command[0])
+    if executable.is_absolute() or executable.parts[:2] != ('.venv', 'bin') or len(executable.parts) != 3:
+        raise ValueError('command must start with .venv/bin/python or another .venv/bin executable')
+    environment = data.get('env', {})
+    if not isinstance(environment, dict):
+        raise ValueError('env must be a table of non-secret string values')
+    for key, value in environment.items():
+        if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', key) or not isinstance(value, str) or '\0' in value:
+            raise ValueError('Invalid env name or value')
+        if key.startswith(('GPU_', 'CUDA_', 'UV_', 'PYTHON', 'LD_', 'GIT_')) or key in ('HOME', 'PATH', 'VIRTUAL_ENV'):
+            raise ValueError(f'Environment setting reserved by the runner: {key}')
+    return pin, command, environment
+
+
+def submit(args):
+    if not re.fullmatch(r'(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})', args.ref):
+        raise ValueError('--ref must be a full Git commit SHA; resolve branches/tags before submission')
+    relative = Path(args.config)
+    if relative.is_absolute() or '..' in relative.parts:
+        raise ValueError('--config must be a file path relative to the project root')
+    programs = {}
+    for name in ('git', 'uv', 'gpu-run'):
+        programs[name] = shutil.which(name)
+        if not programs[name]:
+            raise ValueError(f'{name} is not on PATH; complete the installation step first')
+    repo = args.repo
+    local = Path(repo).expanduser()
+    if local.exists():
+        repo = str(local.resolve())
+    submission = 'submit-' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S') + '-' + uuid.uuid4().hex[:12]
+    path = ROOT / submission
+    path.mkdir(parents=True, mode=0o700)
+    request = dict(repo=repo, revision=args.ref.lower(), config=args.config,
+                   submitted=now(), tools=programs)
+    save(path / 'request.json', request)
+    shutil.copyfile(Path(__file__).resolve(), path / 'prepare.py')
+    print(f'Preparation workspace: {path}', flush=True)
+    # gpu-run holds the GPU lock for this complete preparation + training job.
+    return subprocess.call([programs['gpu-run'], 'submit', '--project', str(path),
+                            '--gpu', args.gpu, '--', '/usr/bin/python3',
+                            str(path / 'prepare.py'), '_prepare', str(path / 'request.json')])
+
+
+def prepare(request_path):
+    request_path = Path(request_path).resolve()
+    request = json.loads(request_path.read_text())
+    project = request_path.parent / 'project'
+    output = Path(os.environ['GPU_JOB_OUTPUT_DIR'])
+    records = output / '_submission'
+    records.mkdir(mode=0o700)
+    status_path = records / 'preparation.json'
+    state = dict(started=now(), phase='cloning', repo=request['repo'],
+                 requested_revision=request['revision'], checkout=str(project))
+    save(status_path, state)
+    environment = os.environ.copy()
+    # A submitter's unrelated virtualenv/uv settings must not choose this job's environment.
+    for key in list(environment):
+        if key.startswith('UV_') or key in ('VIRTUAL_ENV', 'PYTHONHOME', 'PYTHONPATH'):
+            environment.pop(key)
+    environment['GIT_TERMINAL_PROMPT'] = '0'
+    environment.setdefault('GIT_SSH_COMMAND', 'ssh -oBatchMode=yes')
+
+    def run(command, cwd=None, capture=False):
+        print('+ ' + ' '.join(command), flush=True)
+        result = subprocess.run(command, cwd=cwd, env=environment, check=True,
+                                stdout=subprocess.PIPE if capture else None, text=True)
+        return result.stdout.strip() if capture else None
+
+    try:
+        git = request['tools']['git']
+        run([git, 'clone', '--no-checkout', '--no-hardlinks', '--', request['repo'], str(project)])
+        run([git, '-C', str(project), 'checkout', '--detach', request['revision']])
+        actual = run([git, '-C', str(project), 'rev-parse', 'HEAD'], capture=True)
+        if actual.lower() != request['revision']:
+            raise ValueError('Checked-out revision did not match the requested SHA')
+        state.update(phase='validating', revision=actual)
+        save(status_path, state)
+        if (project / '.gitmodules').exists():
+            raise ValueError('Submodules are not supported by this first version')
+        if (project / '.venv').exists():
+            raise ValueError('The project must not commit a .venv directory')
+        pin, command, job_environment = contract(project, request['config'])
+        command = [argument.replace('{output}', str(output)) for argument in command]
+        # Fail early for external local dependencies; projects must be self-contained.
+        definition = tomllib.loads((project / 'pyproject.toml').read_text())
+        uv_definition = definition.get('tool', {}).get('uv', {})
+        if 'workspace' in uv_definition:
+            raise ValueError('uv workspaces are not supported by this first version')
+        for source in uv_definition.get('sources', {}).values():
+            entries = source if isinstance(source, list) else [source]
+            for entry in entries:
+                if isinstance(entry, dict) and 'path' in entry:
+                    local = Path(entry['path'])
+                    if local.is_absolute() or not (project / local).resolve().is_relative_to(project):
+                        raise ValueError('Local dependencies must be inside the checkout')
+        for name in ('pyproject.toml', 'uv.lock', '.python-version'):
+            shutil.copyfile(project / name, records / name)
+        shutil.copyfile(inside(project, request['config']), records / 'train-job.toml')
+        state.update(phase='installing', python_pin=pin, command=command,
+                     uv_version=run([request['tools']['uv'], '--version'], capture=True))
+        save(status_path, state)
+        environment['UV_PROJECT_ENVIRONMENT'] = str(project / '.venv')
+        run([request['tools']['uv'], 'sync', '--locked', '--managed-python', '--python', pin], cwd=project)
+        interpreter = project / '.venv/bin/python'
+        python_version = run([str(interpreter), '-c', 'import platform; print(platform.python_version())'], capture=True)
+        if python_version != pin:
+            raise ValueError('Prepared interpreter does not match .python-version')
+        # Ensure uv did not rewrite tracked source/lock files during setup.
+        if run([git, '-C', str(project), 'diff', '--name-only', 'HEAD'], capture=True):
+            raise ValueError('Preparation changed tracked project files')
+        executable = project / command[0]
+        if not executable.is_file() or not os.access(executable, os.X_OK):
+            raise ValueError('Training executable was not installed in .venv/bin')
+        state.update(phase='training', prepared=now(), python_version=python_version)
+        save(status_path, state)
+        environment.update(job_environment)
+        environment['VIRTUAL_ENV'] = str(project / '.venv')
+        environment['PATH'] = str(project / '.venv/bin') + os.pathsep + environment.get('PATH', os.defpath)
+        # Keep inherited GPU_JOB_OUTPUT_DIR and CUDA_VISIBLE_DEVICES from gpu-run.
+        result = subprocess.run([str(executable), *command[1:]], cwd=project, env=environment)
+        code = result.returncode if result.returncode >= 0 else 128 - result.returncode
+        state.update(phase='finished', ended=now(), training_exit_code=code)
+        save(status_path, state)
+        return code
+    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+        state.update(failed_phase=state['phase'], phase='preparation_failed', ended=now(), error=str(error))
+        save(status_path, state)
+        print(f'train-submit: {error}', file=sys.stderr, flush=True)
+        return 1
+
+
+def main():
+    os.umask(0o077)
+    if len(sys.argv) == 3 and sys.argv[1] == '_prepare':
+        return prepare(sys.argv[2])
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--repo', required=True, help='Git URL or local repository path')
+    parser.add_argument('--ref', required=True, help='Full committed revision SHA')
+    parser.add_argument('--config', default='train-job.toml', help='Job specification within the repository')
+    parser.add_argument('--gpu', default='0', help='Physical GPU index or UUID')
+    return submit(parser.parse_args())
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except (ValueError, OSError, KeyError, subprocess.CalledProcessError) as error:
+        print(f'train-submit: {error}', file=sys.stderr)
+        sys.exit(1)
