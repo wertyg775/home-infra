@@ -145,6 +145,81 @@ p=pathlib.Path('.venv/bin'); p.mkdir(parents=True)
         (self.repo / '.python-version').write_text('3.13\n')
         with self.assertRaises(ValueError): module.contract(self.repo, 'train-job.toml')
 
+    def init_args(self, **changes):
+        values = dict(project=self.repo, train='train.py', epochs=120,
+                      config='generated.toml', force=False, command=[])
+        values.update(changes)
+        return argparse.Namespace(**values)
+
+    def test_init_generates_expected_command(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(module.initialize(self.init_args()), 0)
+        _, command, _ = module.contract(self.repo, 'generated.toml')
+        self.assertEqual(command, ['.venv/bin/python', '-u', 'train.py',
+                                  '--epochs', '120', '--output', '{output}'])
+        self.assertFalse((self.repo / '.venv').exists())
+
+    def test_init_preserves_existing_file_and_force_replaces(self):
+        target = self.repo / 'generated.toml'
+        target.write_text('keep me')
+        with self.assertRaises(ValueError): module.initialize(self.init_args())
+        self.assertEqual(target.read_text(), 'keep me')
+        with contextlib.redirect_stdout(io.StringIO()):
+            module.initialize(self.init_args(force=True))
+        module.contract(self.repo, 'generated.toml')
+
+    def test_init_rejects_invalid_inputs_without_writing(self):
+        for changes in ({'epochs': 0}, {'epochs': -1}, {'train': 'missing.py'},
+                        {'config': '../outside.toml'}, {'train': None},
+                        {'command': ['--', '.venv/bin/python', '-V']}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                module.initialize(self.init_args(**changes))
+        self.assertFalse((self.repo / 'generated.toml').exists())
+
+    def test_explicit_command_round_trips_special_characters(self):
+        command = ['.venv/bin/python', '-c', 'print("hello")',
+                   'line1\nline2', 'back\\slash', 'é😀', '{output}', '$(touch HACKED)']
+        with contextlib.redirect_stdout(io.StringIO()):
+            module.initialize(self.init_args(train=None, epochs=None, command=['--', *command]))
+        self.assertEqual(module.contract(self.repo, 'generated.toml')[1], command)
+
+    def test_init_rejects_symlink_target(self):
+        (self.repo / 'generated.toml').symlink_to(self.repo / 'train-job.toml')
+        with self.assertRaises(ValueError): module.initialize(self.init_args(force=True))
+
+    def test_validate_checks_lock_without_sync_or_training(self):
+        args = argparse.Namespace(project=self.repo, config='train-job.toml')
+        with patch.object(module.shutil, 'which', return_value='/fake/uv'), \
+             patch.object(module.subprocess, 'run') as run, \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(module.validate(args), 0)
+        self.assertEqual(run.call_args.args[0],
+                         ['/fake/uv', 'lock', '--check', '--managed-python', '--python', '3.13.99'])
+        self.assertEqual(run.call_args.kwargs['cwd'], self.repo)
+        self.assertFalse((self.repo / '.venv').exists())
+
+    def test_validate_propagates_stale_lock_failure(self):
+        args = argparse.Namespace(project=self.repo, config='train-job.toml')
+        with patch.object(module.shutil, 'which', return_value='/fake/uv'), \
+             patch.object(module.subprocess, 'run', side_effect=subprocess.CalledProcessError(1, ['uv'])):
+            with self.assertRaises(subprocess.CalledProcessError): module.validate(args)
+
+    def test_validate_names_invalid_toml_file(self):
+        (self.repo / 'train-job.toml').write_text('command = ["broken\n"]')
+        with self.assertRaisesRegex(ValueError, 'train-job.toml:'):
+            module.validate(argparse.Namespace(project=self.repo, config='train-job.toml'))
+
+    def test_init_cli_and_original_submit_cli_coexist(self):
+        result = subprocess.run([sys.executable, str(SOURCE), 'init', '--project', str(self.repo),
+                                 '--config', 'generated.toml', '--train', 'train.py', '--epochs', '2'],
+                                text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(module.contract(self.repo, 'generated.toml')[1][-3:], ['2', '--output', '{output}'])
+        with patch.object(sys, 'argv', ['train-submit', '--repo', str(self.repo), '--ref', self.sha]), \
+             patch.object(module, 'submit', return_value=0) as submit:
+            self.assertEqual(module.main(), 0)
+        self.assertEqual(submit.call_args.args[0].ref, self.sha)
+
     def test_branch_ref_rejected(self):
         args = argparse.Namespace(repo=str(self.repo), ref='main', config='train-job.toml', gpu='0')
         with self.assertRaises(ValueError): module.submit(args)

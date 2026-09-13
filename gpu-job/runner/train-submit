@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import tomllib
 import uuid
 
@@ -37,13 +38,24 @@ def inside(project, relative):
     return path
 
 
-def contract(project, filename):
+def read_toml(path):
+    try:
+        return tomllib.loads(path.read_text())
+    except tomllib.TOMLDecodeError as error:
+        raise ValueError(f"{path.name}: {error}") from error
+
+
+def project_pin(project):
     for name in ('pyproject.toml', 'uv.lock', '.python-version'):
         inside(project, name)
     pin = (project / '.python-version').read_text().strip()
     if not re.fullmatch(r'3\.13\.[0-9]+', pin):
         raise ValueError('.python-version must pin an exact Python 3.13 patch, e.g. 3.13.7')
-    data = tomllib.loads(inside(project, filename).read_text())
+    read_toml(project / 'pyproject.toml')
+    return pin
+
+
+def command_contract(data):
     if set(data) - {'command', 'env'}:
         raise ValueError('train-job.toml supports only command and env')
     command = data.get('command')
@@ -61,7 +73,88 @@ def contract(project, filename):
             raise ValueError('Invalid env name or value')
         if key.startswith(('GPU_', 'CUDA_', 'UV_', 'PYTHON', 'LD_', 'GIT_')) or key in ('HOME', 'PATH', 'VIRTUAL_ENV'):
             raise ValueError(f'Environment setting reserved by the runner: {key}')
+    return command, environment
+
+
+def contract(project, filename):
+    pin = project_pin(project)
+    command, environment = command_contract(read_toml(inside(project, filename)))
     return pin, command, environment
+
+
+def initialize(args):
+    project = args.project.expanduser().resolve(strict=True)
+    project_pin(project)
+    command = args.command
+    if command and command[0] == '--':
+        command = command[1:]
+    if command:
+        if args.train is not None or args.epochs is not None:
+            raise ValueError('Use --train/--epochs or an explicit command after --, not both')
+    else:
+        if args.train is None or args.epochs is None:
+            raise ValueError('Provide --train FILE --epochs COUNT, or a command after --')
+        if args.epochs < 1:
+            raise ValueError('--epochs must be positive')
+        inside(project, args.train)
+        if Path(args.train).suffix != '.py':
+            raise ValueError('--train must name a Python file; use -- COMMAND for other executables')
+        command = ['.venv/bin/python', '-u', args.train, '--epochs', str(args.epochs),
+                   '--output', '{output}']
+    command_contract({'command': command})
+    destination = Path(args.config)
+    if destination.is_absolute() or '..' in destination.parts:
+        raise ValueError('--config must stay inside the project')
+    target = project / destination
+    if target.is_symlink() or not target.resolve().is_relative_to(project):
+        raise ValueError('Config destination must not be a symlink or leave the project')
+    if not target.parent.is_dir():
+        raise ValueError('Create the config parent directory first')
+    # JSON string escaping with literal Unicode is compatible with TOML basic strings.
+    content = 'command = [\n' + ''.join('  ' + json.dumps(arg, ensure_ascii=False) + ',\n' for arg in command) + ']\n'
+    tomllib.loads(content)
+    if args.force:
+        with tempfile.NamedTemporaryFile(mode='w', dir=target.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(content)
+        try:
+            temporary.replace(target)
+        finally:
+            temporary.unlink(missing_ok=True)
+    else:
+        try:
+            with target.open('x') as handle:
+                handle.write(content)
+        except FileExistsError as error:
+            raise ValueError(f'{args.config} already exists; use --force to replace it') from error
+    print(f'Created {target}')
+    print('Assumes the script accepts --epochs and --output.' if not args.command
+          else 'Saved the explicit command without running it.')
+    print('Next: train-submit validate, review the diff, then commit.')
+    return 0
+
+
+def validate(args):
+    project = args.project.expanduser().resolve(strict=True)
+    pin, command, _ = contract(project, args.config)
+    # Check a direct Python script when identifiable; module and custom CLI semantics
+    # cannot be established without running user code.
+    if Path(command[0]).name.startswith('python'):
+        positional = command[1:]
+        while positional and positional[0] in ('-u', '-B'):
+            positional = positional[1:]
+        if positional and not positional[0].startswith('-'):
+            inside(project, positional[0])
+    uv = shutil.which('uv')
+    if not uv:
+        raise ValueError('uv is not on PATH')
+    environment = {key: value for key, value in os.environ.items()
+                   if not key.startswith('UV_') and key not in ('VIRTUAL_ENV', 'PYTHONHOME', 'PYTHONPATH')}
+    subprocess.run([uv, 'lock', '--check', '--managed-python', '--python', pin],
+                   cwd=project, env=environment, check=True)
+    print(f'Valid: {args.config}, project files, Python pin and uv lock')
+    print('Training was not executed; script argument support and GPU compatibility are not tested.')
+    return 0
 
 
 def submit(args):
@@ -185,7 +278,19 @@ def main():
     os.umask(0o077)
     if len(sys.argv) == 3 and sys.argv[1] == '_prepare':
         return prepare(sys.argv[2])
-    parser = argparse.ArgumentParser(description=__doc__)
+    if len(sys.argv) > 1 and sys.argv[1] in ('init', 'validate'):
+        action = sys.argv[1]
+        parser = argparse.ArgumentParser(prog='train-submit ' + action)
+        parser.add_argument('--project', type=Path, default=Path.cwd(), help='Project directory (default: current directory)')
+        parser.add_argument('--config', default='train-job.toml', help='Relative job specification path')
+        if action == 'init':
+            parser.add_argument('--train', help='Python training file relative to the project')
+            parser.add_argument('--epochs', type=int, help='Positive epoch count')
+            parser.add_argument('--force', action='store_true', help='Replace an existing job file')
+            parser.add_argument('command', nargs=argparse.REMAINDER, help='Explicit command after -- (instead of --train/--epochs)')
+        args = parser.parse_args(sys.argv[2:])
+        return initialize(args) if action == 'init' else validate(args)
+    parser = argparse.ArgumentParser(description=__doc__, epilog='Also available: train-submit init --help; train-submit validate --help')
     parser.add_argument('--repo', required=True, help='Git URL or local repository path')
     parser.add_argument('--ref', required=True, help='Full committed revision SHA')
     parser.add_argument('--config', default='train-job.toml', help='Job specification within the repository')
