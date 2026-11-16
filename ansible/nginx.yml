@@ -1,0 +1,10 @@
+--- 
+- name: Configure Nginx proxy
+  hosts: nginx_proxy
+  become: true
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: nginx_proxy
+      tags: [nginx]

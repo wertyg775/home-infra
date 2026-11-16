@@ -1,0 +1,44 @@
+---
+- name: Bootstrap Nginx LXC
+  hosts: nginx_proxy_bootstrap
+  gather_facts: false
+  become: false
+
+  vars_prompt:
+    - name: admin_password
+      prompt: "Choose the admin user's sudo password"
+      private: true
+      confirm: true
+
+  tasks:
+    - name: Install SSH and sudo
+      ansible.builtin.apt:
+        name:
+          - openssh-server
+          - sudo
+        state: present
+        update_cache: true
+
+    - name: Create admin
+      ansible.builtin.user:
+        name: admin
+        groups: sudo
+        append: true
+        shell: /bin/bash
+
+    - name: Set admin password
+      ansible.builtin.command:
+        cmd: chpasswd
+        stdin: "admin:{{ admin_password }}"
+      no_log: true
+
+    - name: Install workstation public key
+      ansible.posix.authorized_key:
+        user: admin
+        key: "{{ lookup('ansible.builtin.file', '/home/admin/.ssh/homelab_guest.pub') }}"
+
+    - name: Start SSH
+      ansible.builtin.service:
+        name: ssh
+        state: started
+        enabled: true

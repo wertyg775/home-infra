@@ -1,0 +1,92 @@
+---
+- name: Ensure the stack directory exists
+  ansible.builtin.file:
+    path: "{{ stack_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Create the per-service config directories
+  ansible.builtin.file:
+    path: "{{ stack_dir }}/{{ item }}"
+    state: directory
+    owner: "{{ puid }}"
+    group: "{{ pgid }}"
+    mode: "0755"
+  loop:
+    - sonarr-config
+    - qbit-config
+    - prowlarr-config
+
+- name: Mount the media filesystem
+  ansible.posix.mount:
+    path: "{{ media_root }}"
+    src: "{{ media_nfs_src }}"
+    fstype: nfs
+    opts: "{{ media_nfs_opts }}"
+    state: mounted
+  when: media_nfs_src | length > 0
+
+- name: Create the media tree
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ media_dirs }}"
+
+- name: Set ownership of the media tree
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ puid }}"
+    group: "{{ pgid }}"
+    mode: "0755"
+  loop: "{{ media_dirs }}"
+  when: media_manage_ownership | bool
+
+# --- adoption guard -------------------------------------------------------
+# Do not clobber a hand-written compose file. First run must be reviewed
+# with --check --diff and then applied with -e compose_adopt=true.
+# The guard is skipped in check mode: nothing is written there, and without
+# this the abort would hide the very diff the review step depends on.
+
+- name: Stat the existing compose file
+  ansible.builtin.stat:
+    path: "{{ stack_dir }}/docker-compose.yml"
+  register: arr_compose
+
+- name: Read the existing compose file
+  ansible.builtin.slurp:
+    src: "{{ stack_dir }}/docker-compose.yml"
+  register: arr_compose_raw
+  when: arr_compose.stat.exists
+
+- name: Refuse to overwrite a hand-written compose file
+  ansible.builtin.fail:
+    msg: |
+      {{ stack_dir }}/docker-compose.yml already exists and was not written by Ansible.
+      Review the proposed file before applying it:
+        ansible-playbook site.yml --tags stack --check --diff
+      Confirm the volume sources match the running containers:
+        docker inspect sonarr qbittorrent prowlarr
+      Then re-run with:
+        ansible-playbook site.yml --tags stack -e compose_adopt=true
+  when:
+    - arr_compose.stat.exists
+    - "'Ansible managed' not in (arr_compose_raw.content | b64decode)"
+    - not (compose_adopt | default(false) | bool)
+    - not ansible_check_mode
+
+# --- manage the stack -----------------------------------------------------
+
+- name: Render the compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ stack_dir }}/docker-compose.yml"
+    mode: "0644"
+
+- name: Ensure the stack is running
+  community.docker.docker_compose_v2:
+    project_src: "{{ stack_dir }}"
+    project_name: "{{ compose_project_name }}"
+    state: present
+    pull: "{{ compose_pull }}"

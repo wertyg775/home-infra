@@ -1,0 +1,12 @@
+common_packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - unattended-upgrades
+
+common_app_ports:
+  - 80
+  - 443
+
+sonarr_proxy_domain: sonarr.home.arpa
+sonarr_proxy_upstream: http://192.0.2.101:8989

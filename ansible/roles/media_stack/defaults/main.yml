@@ -1,0 +1,31 @@
+---
+stack_dir: /opt/stacks/arr
+compose_project_name: arr
+
+media_root: /srv/media
+media_nfs_src: ""
+media_nfs_opts: "rw,vers=4.1,_netdev,nofail"
+media_manage_ownership: true
+
+media_dirs:
+  - "{{ media_root }}"
+  - "{{ media_root }}/torrents"
+  - "{{ media_root }}/torrents/tv"
+  - "{{ media_root }}/torrents/movies"
+  - "{{ media_root }}/media"
+  - "{{ media_root }}/media/tv"
+  - "{{ media_root }}/media/movies"
+
+puid: 1000
+pgid: 1000
+timezone: America/New_York
+
+sonarr_image: lscr.io/linuxserver/sonarr:latest
+qbittorrent_image: lscr.io/linuxserver/qbittorrent:latest
+prowlarr_image: lscr.io/linuxserver/prowlarr:latest
+
+sonarr_port: 8989
+qbittorrent_port: 8080
+prowlarr_port: 9696
+
+compose_pull: missing

@@ -1,0 +1,42 @@
+---
+# ---- identity / runtime --------------------------------------------------
+timezone: UTC
+puid: 1000
+pgid: 1000
+docker_users:
+  - admin
+
+# also set docker_repo_os below.
+docker_repo_os: debian
+docker_arch: amd64
+
+# stack directory
+stack_dir: /opt/stacks/arr
+compose_project_name: arr
+
+# ---- storage -------------------------------------------------------------
+media_root: /srv/media
+
+# Leave empty when /srv/media is already a local disk or mounted by hand.
+# Example NFS export: "192.0.2.10:/volume1/media"
+media_nfs_src: ""
+media_nfs_opts: "rw,vers=4.1,_netdev,nofail"
+
+# Set false when the NFS export uses root_squash and cannot be chowned.
+media_manage_ownership: true
+
+# ---- images / ports ------------------------------------------------------
+sonarr_image: lscr.io/linuxserver/sonarr:latest
+qbittorrent_image: lscr.io/linuxserver/qbittorrent:latest
+prowlarr_image: lscr.io/linuxserver/prowlarr:latest
+
+sonarr_port: 8989
+qbittorrent_port: 8080
+prowlarr_port: 9696
+
+# "missing" stops :latest from silently upgrading. Use "always" to update.
+compose_pull: missing
+
+# ---- firewall (off by default so you cannot lock yourself out) -----------
+manage_firewall: false
+lan_cidr: 192.0.2.0/24

@@ -1,0 +1,12 @@
+---
+- name: Configure Docker hosts
+  hosts: docker_hosts
+  become: true
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: docker
+      tags: [docker]
+    - role: media_stack
+      tags: [stack]

@@ -1,0 +1,30 @@
+---
+# Set the VM's SSH user and key in inventory/hosts.yml.
+docker_repo_os: debian  # Change to ubuntu if the VM runs Ubuntu.
+docker_arch: amd64
+docker_users: []
+
+# Set a DNS name and obtain an installation ID and key at bitwarden.com/host.
+# Store the ID and key in Ansible Vault
+bitwarden_domain: "vault.home.arpa"
+bitwarden_installation_id: ""
+bitwarden_installation_key: ""
+
+# Paths on the Ansible control machine, not on the VM. Use a certificate
+# trusted by your client devices and its matching private key.
+bitwarden_tls_cert_src: ""
+bitwarden_tls_key_src: ""
+
+# Optional SMTP details for email verification and invitations. Store the
+# password in Ansible Vault as well. Leave all blank until SMTP is configured.
+bitwarden_smtp_host: ""
+bitwarden_smtp_port: ""
+bitwarden_smtp_ssl: false
+bitwarden_smtp_username: ""
+bitwarden_smtp_password: ""
+bitwarden_smtp_reply_to: ""
+
+manage_firewall: false
+common_app_ports:
+  - "{{ bitwarden_http_port | default(80) }}"
+  - "{{ bitwarden_https_port | default(443) }}"

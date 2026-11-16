@@ -1,0 +1,45 @@
+# {{ ansible_managed }}
+services:
+  sonarr:
+    image: {{ sonarr_image }}
+    container_name: sonarr
+    environment:
+      - PUID={{ puid }}
+      - PGID={{ pgid }}
+      - TZ={{ timezone }}
+    volumes:
+      - ./sonarr-config:/config
+      - {{ media_root }}:/data
+    ports:
+      - "{{ sonarr_port }}:8989"
+    restart: unless-stopped
+
+  qbittorrent:
+    image: {{ qbittorrent_image }}
+    container_name: qbittorrent
+    environment:
+      - PUID={{ puid }}
+      - PGID={{ pgid }}
+      - TZ={{ timezone }}
+      - WEBUI_PORT=8080
+    volumes:
+      - ./qbit-config:/config
+      - {{ media_root }}:/data
+    ports:
+      - "{{ qbittorrent_port }}:8080"
+      - "6881:6881"
+      - "6881:6881/udp"
+    restart: unless-stopped
+
+  prowlarr:
+    image: {{ prowlarr_image }}
+    container_name: prowlarr
+    environment:
+      - PUID={{ puid }}
+      - PGID={{ pgid }}
+      - TZ={{ timezone }}
+    volumes:
+      - ./prowlarr-config:/config
+    ports:
+      - "{{ prowlarr_port }}:9696"
+    restart: unless-stopped
