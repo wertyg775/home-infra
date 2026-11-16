@@ -10,3 +10,17 @@
     name: nginx
     state: started
     enabled: true
+
+- name: Configure Sonarr proxy
+  ansible.builtin.template:
+    src: sonarr.conf.j2
+    dest: /etc/nginx/sites-available/sonarr
+    mode: "0644"
+  notify: Apply Nginx configuration
+
+- name: Enable Sonarr proxy
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/sonarr
+    dest: /etc/nginx/sites-enabled/sonarr
+    state: link
+  notify: Apply Nginx configuration
