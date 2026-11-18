@@ -22,6 +22,7 @@ backups/
 *.tgz
 *.log
 .DS_Store
+.venv
 
 # Terraform local state, secrets, plans, and downloaded providers
 .terraform/
