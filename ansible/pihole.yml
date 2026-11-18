@@ -1,0 +1,21 @@
+---
+- name: Configure the Pi-hole LXC
+  hosts: pihole_hosts
+  become: true
+
+  pre_tasks:
+    - name: Check the Pi-hole admin password
+      ansible.builtin.assert:
+        that:
+          - pihole_admin_password is defined
+          - pihole_admin_password | default('') | trim | length > 0
+          - "'\n' not in (pihole_admin_password | default(''))"
+          - "'\r' not in (pihole_admin_password | default(''))"
+        fail_msg: Set a nonempty, single-line pihole_admin_password in Ansible Vault.
+      tags: [pihole]
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: pihole
+      tags: [pihole]

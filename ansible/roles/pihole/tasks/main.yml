@@ -1,0 +1,80 @@
+---
+- name: Check whether Pi-hole is installed
+  ansible.builtin.stat:
+    path: /usr/local/bin/pihole
+  register: pihole_binary
+
+- name: Check for an interrupted Pi-hole installation
+  ansible.builtin.stat:
+    path: /var/lib/pihole-ansible/install-pending
+  register: pihole_install_pending
+
+- name: Install Pi-hole
+  when:
+    - not ansible_check_mode
+    - not pihole_binary.stat.exists or pihole_install_pending.stat.exists
+  block:
+    - name: Create the Pi-hole configuration directory
+      ansible.builtin.file:
+        path: /etc/pihole
+        state: directory
+        mode: "0755"
+
+    # An existing v6 config lets the official installer run unattended.
+    # Never replace configuration from an existing or interrupted install.
+    - name: Seed the initial Pi-hole configuration
+      ansible.builtin.copy:
+        dest: /etc/pihole/pihole.toml
+        content: |
+          [dns]
+          upstreams = {{ pihole_upstreams | to_json }}
+        force: false
+        mode: "0644"
+
+    - name: Create the installer state directory
+      ansible.builtin.file:
+        path: /var/lib/pihole-ansible
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Download the official Pi-hole installer
+      ansible.builtin.get_url:
+        url: https://install.pi-hole.net
+        dest: /usr/local/src/pihole-install.sh
+        mode: "0755"
+
+    - name: Mark installation as pending
+      ansible.builtin.copy:
+        dest: /var/lib/pihole-ansible/install-pending
+        content: ""
+        mode: "0644"
+
+    - name: Run the unattended Pi-hole installer
+      ansible.builtin.command:
+        argv:
+          - bash
+          - /usr/local/src/pihole-install.sh
+          - --unattended
+
+    - name: Clear the pending installation marker
+      ansible.builtin.file:
+        path: /var/lib/pihole-ansible/install-pending
+        state: absent
+
+- name: Enable and start Pi-hole
+  ansible.builtin.service:
+    name: pihole-FTL
+    state: started
+    enabled: true
+  when: not ansible_check_mode
+
+- name: Set the Pi-hole admin password
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/pihole
+      - setpassword
+    stdin: "{{ pihole_admin_password }}\n{{ pihole_admin_password }}"
+  no_log: true
+  when: not ansible_check_mode

@@ -1,5 +1,13 @@
 ---
-- name: reload ssh
+- name: Validate SSH configuration
+  ansible.builtin.command: /usr/sbin/sshd -t
+  check_mode: false
+  changed_when: false
+  listen: restart ssh
+
+- name: Apply SSH configuration
   ansible.builtin.service:
     name: ssh
-    state: reloaded
+    # A reload can fail to rebind port 22 when systemd holds the socket.
+    state: restarted
+  listen: restart ssh

@@ -1,0 +1,5 @@
+---
+# Used to seed a new installation. Existing Pi-hole settings are preserved.
+pihole_upstreams:
+  - 1.1.1.1
+  - 1.0.0.1

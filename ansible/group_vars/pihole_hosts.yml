@@ -1,0 +1,9 @@
+common_packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - unattended-upgrades
+
+# Upstream resolvers for the initial installation; after installation, manage
+# them in Pi-hole. Keep the admin password in Ansible Vault.
+# pihole_upstreams: [1.1.1.1, 1.0.0.1]

@@ -8,6 +8,7 @@ Configures homelab VMs over SSH from this workstation.
 |---|---|
 | 192.0.2.101 | VM for hosting docker containers  |
 | 192.0.2.102 | Bitwarden Lite (configuration required) |
+| 192.0.2.104 | Pi-hole LXC |
 
 ## Roles (tasks)
 
@@ -145,4 +146,47 @@ container running, then update the image version and rerun the playbook.
 The optional common-role UFW rules do not reliably restrict Docker-published
 ports. Apply any required network access restrictions at the network firewall
 or through Docker-aware firewall rules.
+
+## Configure and run Pi-hole
+
+`pihole.yml` installs [Pi-hole](https://docs.pi-hole.net/main/basic-install/)
+directly in the existing Debian LXC in `pihole_hosts`. The LXC needs a static
+IP and working network access. The inventory and Terraform configuration use
+`192.0.2.104`. If necessary, first run `ansible-playbook bootstrap-pihole.yml`
+to create the SSH user; this uses the Proxmox host and container ID in
+`pihole_bootstrap`. The bootstrap password is also the user's sudo password.
+
+Create an encrypted Vault file for the admin password:
+
+```bash
+cd ansible
+ansible-vault create pihole-secrets.yml
+```
+
+Add a nonempty, single-line password to the Vault file:
+
+```yaml
+pihole_admin_password: "YOUR_PASSWORD"
+```
+
+Verify that TCP and UDP port 53 and TCP ports 80 and 443 are free on the LXC,
+and restrict access to trusted networks with a firewall. Then run:
+
+```bash
+ansible pihole_hosts -m ping --ask-become-pass
+ansible-playbook pihole.yml -e @pihole-secrets.yml --ask-vault-pass --ask-become-pass
+```
+
+Open `http://192.0.2.104/admin/` and test DNS, for example with
+`dig @192.0.2.104 example.com`. Once verified, configure clients or the
+router's DHCP settings to use that address for DNS. Initial upstreams are
+Cloudflare (`1.1.1.1` and `1.0.0.1`); customize `pihole_upstreams` in group
+vars before installation, then manage upstreams in Pi-hole. Pi-hole does not
+automatically inherit existing local DNS records, so configure any required
+local names before switching clients.
+
+Settings and query data live in `/etc/pihole`. The playbook applies the Vault
+password on each run; update it in Vault when changing the password. Back up
+the configuration before upgrading with `sudo pihole -up`. This setup does not
+enable Pi-hole's DHCP server.
 
