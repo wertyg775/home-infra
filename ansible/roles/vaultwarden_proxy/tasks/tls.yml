@@ -1,0 +1,104 @@
+---
+- name: Inspect the signing CA on the control machine
+  community.crypto.x509_certificate_info:
+    path: "{{ vaultwarden_ca_cert_src }}"
+    valid_at:
+      current: "+0s"
+      certificate_expiry: "{{ vaultwarden_cert_validity }}"
+  delegate_to: localhost
+  become: false
+  register: vaultwarden_ca_info
+
+- name: Check the signing CA
+  ansible.builtin.assert:
+    that:
+      - "'CA:TRUE' in (vaultwarden_ca_info.basic_constraints | default([], true))"
+      - vaultwarden_ca_info.subject_ordered == vaultwarden_ca_info.issuer_ordered
+      - vaultwarden_ca_info.valid_at.current
+    fail_msg: Supply a valid root CA certificate that can sign certificates.
+
+- name: Generate the Vaultwarden private key on the VM
+  community.crypto.openssl_privatekey:
+    path: "{{ vaultwarden_proxy_tls_dir }}/ssl.key"
+    type: RSA
+    size: 3072
+    regenerate: never
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+
+- name: Create a certificate signing request on the VM
+  community.crypto.openssl_csr_pipe:
+    privatekey_path: "{{ vaultwarden_proxy_tls_dir }}/ssl.key"
+    common_name: "{{ vaultwarden_domain }}"
+    subject_alt_name:
+      - "DNS:{{ vaultwarden_domain }}"
+    basic_constraints:
+      - "CA:FALSE"
+    basic_constraints_critical: true
+    key_usage:
+      - digitalSignature
+      - keyEncipherment
+    key_usage_critical: true
+    extended_key_usage:
+      - serverAuth
+  register: vaultwarden_csr
+  changed_when: false
+
+- name: Check for an existing Vaultwarden certificate
+  ansible.builtin.stat:
+    path: "{{ vaultwarden_proxy_tls_dir }}/ssl.crt"
+  register: vaultwarden_existing_cert
+
+- name: Read the existing Vaultwarden certificate
+  ansible.builtin.slurp:
+    src: "{{ vaultwarden_proxy_tls_dir }}/ssl.crt"
+  register: vaultwarden_cert_content
+  when: vaultwarden_existing_cert.stat.exists
+
+- name: Check whether the existing certificate needs renewal
+  community.crypto.x509_certificate_info:
+    path: "{{ vaultwarden_proxy_tls_dir }}/ssl.crt"
+    valid_at:
+      renewal: "{{ vaultwarden_cert_renew_before }}"
+  register: vaultwarden_cert_info
+  when: vaultwarden_existing_cert.stat.exists
+
+- name: Sign the Vaultwarden certificate on the control machine
+  community.crypto.x509_certificate_pipe:
+    provider: ownca
+    csr_content: "{{ vaultwarden_csr.csr }}"
+    content: >-
+      {{ (vaultwarden_cert_content.content | b64decode)
+         if vaultwarden_existing_cert.stat.exists else omit }}
+    ownca_path: "{{ vaultwarden_ca_cert_src }}"
+    ownca_privatekey_path: "{{ vaultwarden_ca_key_src }}"
+    ownca_privatekey_passphrase: "{{ vaultwarden_ca_key_passphrase | default(omit, true) }}"
+    ownca_not_before: "-5m"
+    ownca_not_after: "{{ vaultwarden_cert_validity }}"
+    force: >-
+      {{ vaultwarden_existing_cert.stat.exists and
+         not vaultwarden_cert_info.valid_at.renewal }}
+  delegate_to: localhost
+  become: false
+  register: vaultwarden_signed_cert
+  no_log: "{{ vaultwarden_ca_key_passphrase | length > 0 }}"
+  diff: false
+
+- name: Check CA validity for a newly signed certificate
+  ansible.builtin.assert:
+    that:
+      - vaultwarden_ca_info.valid_at.certificate_expiry
+    fail_msg: The root CA expires before the requested Vaultwarden certificate.
+  when: vaultwarden_signed_cert.changed
+
+- name: Install the signed Vaultwarden certificate
+  ansible.builtin.copy:
+    content: "{{ vaultwarden_signed_cert.certificate }}"
+    dest: "{{ vaultwarden_proxy_tls_dir }}/ssl.crt"
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Apply Vaultwarden proxy configuration

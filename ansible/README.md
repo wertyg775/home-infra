@@ -7,7 +7,8 @@ Configures homelab VMs over SSH from this workstation.
 | VM | Role |
 |---|---|
 | 192.0.2.101 | VM for hosting docker containers  |
-| 192.0.2.102 | Bitwarden Lite (configuration required) |
+| 192.0.2.102 | Vaultwarden (configuration required) |
+| 192.0.2.103 | Nginx reverse proxy |
 | 192.0.2.104 | Pi-hole LXC |
 
 ## Roles (tasks)
@@ -19,13 +20,11 @@ Configures homelab VMs over SSH from this workstation.
 | `docker` | Docker apt repo + key, engine/Compose packages, `/etc/docker/daemon.json`, docker group |
 | `media_stack` | `/srv/media` tree (and optional NFS mount), compose file, running containers |
 
-### Bitwarden VM
+### Vaultwarden VM and Nginx proxy
 
-`bitwarden.yml` uses the `common`, `docker`, and `bitwarden` roles. The last
-role runs the official [Bitwarden Lite image](https://bitwarden.com/help/install-and-deploy-lite/)
-with SQLite, HTTPS, and persistent data. It does not build an image. Lite is
-intended for personal use and home labs; its image version is pinned in the
-role defaults.
+`vaultwarden.yml` runs [Vaultwarden](https://github.com/dani-garcia/vaultwarden)
+on the VM and configures the existing Nginx proxy to serve HTTPS. Vaultwarden
+uses SQLite and persistent data; the image version is pinned in role defaults.
 
 ## Prerequisites
 
@@ -88,64 +87,57 @@ ansible-playbook site.yml --tags stack -e compose_pull=always
 Pin a version in `group_vars` for a fixed release
 (`lscr.io/linuxserver/sonarr:4`).
 
-## Configure and run Bitwarden
+## Configure and run Vaultwarden
 
-The playbook configures an existing Debian/Ubuntu VM; it does not create one.
-Before running it, verify that `192.0.2.102` is the intended Bitwarden VM and
-that ports 80 and 443 are available. Bitwarden Lite requires Docker Engine 26+,
-at least 200 MB of RAM, and 1 GB of storage.
+The playbook configures the existing Vaultwarden VM at `192.0.2.102` and the
+Nginx proxy at `192.0.2.103`. It does not create either host or alter existing
+proxy sites. The proxy provides HTTPS and forwards requests to Vaultwarden.
 
-1. Set `ansible_user` and `ansible_ssh_private_key_file` for `bitwarden` in
-   `inventory/hosts.yml`. Set `docker_repo_os` and `docker_arch` in
-   `group_vars/bitwarden_hosts.yml` to match the VM.
-2. Set `bitwarden_domain` to a DNS hostname pointing to the VM. Set
-   `bitwarden_tls_cert_src` and `bitwarden_tls_key_src` to paths on the control
-   machine for a matching PEM certificate chain and private key. The
-   certificate must cover the hostname and be trusted by your devices.
-3. Obtain an installation ID and key from <https://bitwarden.com/host/>.
-   Store them in an encrypted Ansible Vault file:
-
-   ```bash
-   ansible-vault create bitwarden-secrets.yml
-   ```
-
-   Put these values in the encrypted file:
-
-   ```yaml
-   bitwarden_installation_id: "YOUR_INSTALLATION_ID"
-   bitwarden_installation_key: "YOUR_INSTALLATION_KEY"
-   ```
-
-4. Configure the optional SMTP fields in `group_vars/bitwarden_hosts.yml` for
-   verification emails and invitations. Put `bitwarden_smtp_password` in the
-   Vault file as well. SMTP can be added after initial deployment.
-5. From the `ansible` directory, test access and run:
+1. Set the SSH user and key in `inventory/hosts.yml`. Check `docker_repo_os` and
+   `docker_arch` in `group_vars/vaultwarden_hosts.yml` against the app VM.
+2. In `group_vars/all/vaultwarden.yml`, set the root CA certificate and signing
+   key paths on the control machine. Ansible needs read access to both PEM
+   files. Set `vaultwarden_domain` if needed; its DNS record must point to the
+   Nginx proxy (`192.0.2.103`). Install the root CA certificate in the trust
+   store of each client device. The role signs directly with a root CA.
+3. Install the collections from `requirements.yml` and ensure the Ansible
+   control machine's Python has `cryptography` installed. The proxy role
+   installs `python3-cryptography` on the proxy VM. If the CA key has a
+   passphrase, store `vaultwarden_ca_key_passphrase` in an encrypted Ansible
+   Vault file; use `-e @vaultwarden-secrets.yml --ask-vault-pass` below.
+4. From the `ansible` directory, run the two plays. Run them separately if the
+   two `admin` accounts have different sudo passwords:
 
    ```bash
-   ansible bitwarden_hosts -m ping
-   ansible-playbook bitwarden.yml -e @bitwarden-secrets.yml --ask-vault-pass
+   ansible-playbook vaultwarden.yml --limit vaultwarden --ask-become-pass
+   ansible-playbook vaultwarden.yml --limit proxy --ask-become-pass
    ```
 
-Open `https://<your-domain>` after the container starts. Changing certificate
-paths or contents and running the playbook again updates the files and restarts
-Bitwarden. The role keeps the TLS key and environment file private and runs
-the container as an unprivileged user. To apply only the Bitwarden role later,
-add `--tags bitwarden` to the playbook command.
+Open `https://vault.home.arpa` after both plays complete. Signups are enabled
+for the initial account. Once the account is created, set
+`vaultwarden_signups_allowed: false` in `group_vars/vaultwarden_hosts.yml` and
+rerun the app play. SMTP is optional; configure its fields there and store
+`vaultwarden_smtp_password` in Ansible Vault if needed. Mobile push is disabled
+by default, so no Bitwarden installation ID or key is required.
 
-The default host ports are 80 and 443. Override `bitwarden_http_port` and
-`bitwarden_https_port` if needed; Bitwarden listens on those same ports inside
-the container so its HTTP-to-HTTPS redirect uses the externally reachable port.
+The proxy generates its TLS private key on the proxy VM at
+`/etc/nginx/vaultwarden-tls/ssl.key`; the CA key stays on the control machine.
+The certificate is valid for 365 days and is renewed when the proxy play runs
+within 30 days of expiry. Ansible does not schedule renewal by itself. The root
+CA must remain valid for the full lifetime of a new certificate. Certificate
+provisioning is skipped in check mode.
 
-Data lives under `/opt/stacks/bitwarden/data`; the `backups` directory is mounted
-for Bitwarden Lite's backup job. Copy the backups off the VM securely and test
-restores; they include sensitive data-protection keys. Back up `settings.env`
-separately. See the [backup and restore instructions](https://github.com/bitwarden/self-host/blob/main/bitwarden-lite/backup/README.md).
-Before upgrading the pinned `bitwarden_image`, take a backup with the old
-container running, then update the image version and rerun the playbook.
+Vaultwarden data is under `/opt/stacks/vaultwarden/data` on the app VM. Follow
+the [Vaultwarden backup instructions](https://github.com/dani-garcia/vaultwarden/wiki/Backing-up-your-vault)
+for a consistent SQLite backup and the other data files; keep backups off the
+VM and test restores. Take a backup before updating `vaultwarden_image`.
 
-The optional common-role UFW rules do not reliably restrict Docker-published
-ports. Apply any required network access restrictions at the network firewall
-or through Docker-aware firewall rules.
+Clients connect to the Nginx proxy over HTTPS. The proxy connects to the app VM
+over HTTP on port `8080`, so that traffic is unencrypted on the LAN. Restrict
+access to this backend port to the proxy with a network or Docker-aware
+firewall; Docker-published ports may bypass UFW. Change
+`vaultwarden_backend_port` and `vaultwarden_https_port` in the shared settings
+if needed.
 
 ## Configure and run Pi-hole
 

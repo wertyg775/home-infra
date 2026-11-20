@@ -1,0 +1,16 @@
+---
+vaultwarden_stack_dir: /opt/stacks/vaultwarden
+vaultwarden_project_name: vaultwarden
+vaultwarden_image: vaultwarden/server:1.37.5
+vaultwarden_compose_pull: missing
+vaultwarden_uid: 999
+vaultwarden_gid: 999
+vaultwarden_backend_bind_address: "{{ ansible_host }}"
+vaultwarden_signups_allowed: true
+
+vaultwarden_smtp_host: ""
+vaultwarden_smtp_from: ""
+vaultwarden_smtp_port: 587
+vaultwarden_smtp_security: starttls
+vaultwarden_smtp_username: ""
+vaultwarden_smtp_password: ""

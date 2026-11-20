@@ -1,0 +1,11 @@
+---
+- name: Validate the Nginx configuration
+  ansible.builtin.command: nginx -t
+  changed_when: false
+  listen: Apply Vaultwarden proxy configuration
+
+- name: Reload Nginx
+  ansible.builtin.service:
+    name: nginx
+    state: reloaded
+  listen: Apply Vaultwarden proxy configuration

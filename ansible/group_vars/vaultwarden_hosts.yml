@@ -1,0 +1,18 @@
+---
+# Set the VM's SSH user and key in inventory/hosts.yml.
+docker_repo_os: debian  # Change to ubuntu if the VM runs Ubuntu.
+docker_arch: amd64
+docker_users: []
+
+# Leave signups enabled for the initial account, then set to false.
+vaultwarden_signups_allowed: true
+
+# Optional SMTP settings. Store the password in Ansible Vault.
+vaultwarden_smtp_host: ""
+vaultwarden_smtp_from: ""
+vaultwarden_smtp_username: ""
+vaultwarden_smtp_password: ""
+
+manage_firewall: false
+common_app_ports:
+  - "{{ vaultwarden_backend_port }}"

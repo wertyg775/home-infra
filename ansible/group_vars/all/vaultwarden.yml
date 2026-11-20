@@ -1,0 +1,11 @@
+---
+# The DNS name must point to the existing Nginx proxy, not the app VM.
+vaultwarden_domain: vault.home.arpa
+vaultwarden_https_port: 443
+vaultwarden_backend_port: 8080
+
+# Root CA certificate and signing key on the Ansible control machine.
+# Client devices must trust this CA. Store an optional CA key passphrase in
+# Ansible Vault as vaultwarden_ca_key_passphrase.
+vaultwarden_ca_cert_src: /home/admin/.local/share/homelab-ca/ca.crt
+vaultwarden_ca_key_src: /home/admin/.local/share/homelab-ca/ca.key

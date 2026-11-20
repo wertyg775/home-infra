@@ -1,0 +1,16 @@
+# {{ ansible_managed }}
+services:
+  vaultwarden:
+    image: {{ vaultwarden_image | to_json }}
+    env_file:
+      - settings.env
+    user: "{{ vaultwarden_uid }}:{{ vaultwarden_gid }}"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      - {{ (vaultwarden_backend_bind_address ~ ':' ~ vaultwarden_backend_port ~ ':8080/tcp') | to_json }}
+    volumes:
+      - ./data:/data
+    restart: unless-stopped

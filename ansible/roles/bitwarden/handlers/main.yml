@@ -1,8 +1,0 @@
----
-- name: Restart Bitwarden
-  community.docker.docker_compose_v2:
-    project_src: "{{ bitwarden_stack_dir }}"
-    project_name: "{{ bitwarden_project_name }}"
-    state: restarted
-  no_log: true
-  when: not ansible_check_mode

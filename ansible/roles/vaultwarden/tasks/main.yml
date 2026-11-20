@@ -1,0 +1,79 @@
+---
+- name: Check Vaultwarden settings
+  ansible.builtin.assert:
+    that:
+      - vaultwarden_domain is match('^[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]$')
+      - vaultwarden_backend_bind_address | trim | length > 0
+      - vaultwarden_backend_port | int >= 1
+      - vaultwarden_backend_port | int <= 65535
+      - vaultwarden_https_port | int >= 1
+      - vaultwarden_https_port | int <= 65535
+      - vaultwarden_https_port | int != 80
+    fail_msg: Set a valid Vaultwarden domain, backend address, and ports.
+
+- name: Check SMTP settings when an SMTP server is configured
+  ansible.builtin.assert:
+    that:
+      - vaultwarden_smtp_from | trim | length > 0
+      - vaultwarden_smtp_port | int >= 1
+      - vaultwarden_smtp_port | int <= 65535
+      - vaultwarden_smtp_security in ['starttls', 'force_tls', 'off']
+    fail_msg: Set a valid SMTP from address, port, and security mode.
+  when: vaultwarden_smtp_host | trim | length > 0
+
+- name: Reject multiline environment values
+  ansible.builtin.assert:
+    that:
+      - "'\n' not in item"
+      - "'\r' not in item"
+    fail_msg: Vaultwarden environment values must not contain newlines.
+  loop:
+    - "{{ vaultwarden_domain }}"
+    - "{{ vaultwarden_smtp_host }}"
+    - "{{ vaultwarden_smtp_from }}"
+    - "{{ vaultwarden_smtp_username }}"
+    - "{{ vaultwarden_smtp_password }}"
+  no_log: true
+
+- name: Create the Vaultwarden stack directory
+  ansible.builtin.file:
+    path: "{{ vaultwarden_stack_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Create the persistent Vaultwarden data directory
+  ansible.builtin.file:
+    path: "{{ vaultwarden_stack_dir }}/data"
+    state: directory
+    owner: "{{ vaultwarden_uid }}"
+    group: "{{ vaultwarden_gid }}"
+    mode: "0700"
+
+- name: Render Vaultwarden settings
+  ansible.builtin.template:
+    src: settings.env.j2
+    dest: "{{ vaultwarden_stack_dir }}/settings.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+
+- name: Render the Vaultwarden Compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ vaultwarden_stack_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Ensure Vaultwarden is running
+  community.docker.docker_compose_v2:
+    project_src: "{{ vaultwarden_stack_dir }}"
+    project_name: "{{ vaultwarden_project_name }}"
+    state: present
+    pull: "{{ vaultwarden_compose_pull }}"
+  no_log: true
+  when: not ansible_check_mode

@@ -1,0 +1,32 @@
+# {{ ansible_managed }}
+map $http_upgrade $vaultwarden_connection_upgrade {
+    default upgrade;
+    ''      "";
+}
+
+server {
+    listen 80;
+    server_name {{ vaultwarden_domain }};
+    return 301 https://$host{% if vaultwarden_https_port | int != 443 %}:{{ vaultwarden_https_port }}{% endif %}$request_uri;
+}
+
+server {
+    listen {{ vaultwarden_https_port }} ssl;
+    server_name {{ vaultwarden_domain }};
+
+    ssl_certificate {{ vaultwarden_proxy_tls_dir }}/ssl.crt;
+    ssl_certificate_key {{ vaultwarden_proxy_tls_dir }}/ssl.key;
+    client_max_body_size 525M;
+    access_log off;
+
+    location / {
+        proxy_pass http://{{ hostvars[groups['vaultwarden_hosts'][0]].ansible_host }}:{{ vaultwarden_backend_port }};
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $vaultwarden_connection_upgrade;
+    }
+}

@@ -1,0 +1,57 @@
+---
+- name: Check Vaultwarden proxy settings
+  ansible.builtin.assert:
+    that:
+      - vaultwarden_domain is match('^[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]$')
+      - vaultwarden_ca_cert_src | trim | length > 0
+      - vaultwarden_ca_key_src | trim | length > 0
+      - vaultwarden_https_port | int >= 1
+      - vaultwarden_https_port | int <= 65535
+      - vaultwarden_https_port | int != 80
+      - vaultwarden_backend_port | int >= 1
+      - vaultwarden_backend_port | int <= 65535
+      - groups['vaultwarden_hosts'] | length == 1
+    fail_msg: Set a valid Vaultwarden domain, CA paths, ports, and one backend host.
+
+- name: Ensure Nginx and certificate tooling are installed
+  ansible.builtin.apt:
+    name:
+      - nginx
+      - python3-cryptography
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the Vaultwarden TLS directory
+  ansible.builtin.file:
+    path: "{{ vaultwarden_proxy_tls_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Configure the Vaultwarden proxy certificate
+  ansible.builtin.include_tasks: tls.yml
+  when: not ansible_check_mode
+
+- name: Configure the Vaultwarden Nginx site
+  ansible.builtin.template:
+    src: vaultwarden.conf.j2
+    dest: /etc/nginx/sites-available/vaultwarden
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Apply Vaultwarden proxy configuration
+
+- name: Enable the Vaultwarden Nginx site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/vaultwarden
+    dest: /etc/nginx/sites-enabled/vaultwarden
+    state: link
+  notify: Apply Vaultwarden proxy configuration
+
+- name: Ensure Nginx is running
+  ansible.builtin.service:
+    name: nginx
+    state: started
+    enabled: true

@@ -1,0 +1,5 @@
+---
+vaultwarden_proxy_tls_dir: /etc/nginx/vaultwarden-tls
+vaultwarden_ca_key_passphrase: ""
+vaultwarden_cert_validity: "+365d"
+vaultwarden_cert_renew_before: "+30d"

@@ -1,0 +1,29 @@
+---
+- name: Configure the Vaultwarden VM
+  hosts: vaultwarden_hosts
+  become: true
+
+  pre_tasks:
+    - name: Check the Vaultwarden CA paths
+      ansible.builtin.assert:
+        that:
+          - vaultwarden_ca_cert_src | trim | length > 0
+          - vaultwarden_ca_key_src | trim | length > 0
+        fail_msg: Set the CA certificate and key paths in group_vars/all/vaultwarden.yml.
+      tags: [vaultwarden]
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: docker
+      tags: [docker]
+    - role: vaultwarden
+      tags: [vaultwarden]
+
+- name: Configure Vaultwarden on the existing Nginx proxy
+  hosts: nginx_proxy
+  become: true
+
+  roles:
+    - role: vaultwarden_proxy
+      tags: [vaultwarden]
