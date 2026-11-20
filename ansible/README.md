@@ -87,6 +87,32 @@ ansible-playbook site.yml --tags stack -e compose_pull=always
 Pin a version in `group_vars` for a fixed release
 (`lscr.io/linuxserver/sonarr:4`).
 
+## Configure the media stack proxy
+
+`nginx.yml` enables HTTP sites for `sonarr.home.arpa`, `qbittorrent.home.arpa`,
+and `prowlarr.home.arpa` on the Nginx proxy. Point those DNS records at
+`192.0.2.103`. The hostnames are configured in `group_vars/nginx_proxy.yml`,
+and the upstream ports come from the media VM's inventory variables.
+
+```bash
+ansible-playbook nginx.yml --tags nginx
+```
+
+### Enable the proxy firewall
+
+The `common` role allows TCP ports `22`, `80`, and `443` from `192.0.2.0/24`
+and sets UFW's default inbound policy to deny. The rules are in
+`group_vars/nginx_proxy.yml`. Run the firewall tasks from a LAN workstation
+with SSH access to the proxy.
+
+```bash
+ansible-playbook nginx.yml --tags firewall --ask-become-pass
+```
+
+Verify a fresh SSH connection and the expected HTTP and HTTPS sites. Check
+`sudo ufw status verbose` on the proxy for any pre-existing rules. The role
+adds its rules alongside existing ones.
+
 ## Configure and run Vaultwarden
 
 The playbook configures the existing Vaultwarden VM at `192.0.2.102` and the

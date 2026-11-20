@@ -1,0 +1,17 @@
+---
+media_stack_proxy_backend_host: containers
+
+sonarr_proxy_upstream: "http://{{ hostvars[media_stack_proxy_backend_host].ansible_host }}:{{ hostvars[media_stack_proxy_backend_host].sonarr_port }}"
+qbittorrent_proxy_upstream: "http://{{ hostvars[media_stack_proxy_backend_host].ansible_host }}:{{ hostvars[media_stack_proxy_backend_host].qbittorrent_port }}"
+prowlarr_proxy_upstream: "http://{{ hostvars[media_stack_proxy_backend_host].ansible_host }}:{{ hostvars[media_stack_proxy_backend_host].prowlarr_port }}"
+
+media_stack_proxy_sites:
+  - name: sonarr
+    domain: "{{ sonarr_proxy_domain }}"
+    upstream: "{{ sonarr_proxy_upstream }}"
+  - name: qbittorrent
+    domain: "{{ qbittorrent_proxy_domain }}"
+    upstream: "{{ qbittorrent_proxy_upstream }}"
+  - name: prowlarr
+    domain: "{{ prowlarr_proxy_domain }}"
+    upstream: "{{ prowlarr_proxy_upstream }}"

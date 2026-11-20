@@ -30,6 +30,7 @@
 
 - name: Enable the host firewall
   when: manage_firewall | bool
+  tags: [firewall]
   block:
     - name: Install ufw
       ansible.builtin.apt:
@@ -41,6 +42,7 @@
         rule: allow
         port: "22"
         proto: tcp
+      when: common_firewall_rules is not defined
 
     - name: Allow app ports from the LAN only
       community.general.ufw:
@@ -49,8 +51,24 @@
         proto: tcp
         from_ip: "{{ lan_cidr }}"
       loop: "{{ common_app_ports }}"
+      when: common_firewall_rules is not defined
 
-    - name: Enable ufw with default deny
+    - name: Allow configured inbound traffic
+      community.general.ufw:
+        rule: allow
+        direction: in
+        port: "{{ item.port }}"
+        proto: "{{ item.proto }}"
+        from_ip: "{{ item.source }}"
+      loop: "{{ common_firewall_rules | default([]) }}"
+      loop_control:
+        label: "{{ item.source }} to {{ item.port }}/{{ item.proto }}"
+
+    - name: Deny other incoming traffic by default
+      community.general.ufw:
+        policy: deny
+        direction: incoming
+
+    - name: Enable ufw
       community.general.ufw:
         state: enabled
-        policy: deny

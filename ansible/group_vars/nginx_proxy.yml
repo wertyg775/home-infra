@@ -4,9 +4,18 @@ common_packages:
   - gnupg
   - unattended-upgrades
 
-common_app_ports:
-  - 80
-  - 443
+manage_firewall: true
+common_firewall_rules:
+  - port: 22
+    proto: tcp
+    source: "{{ lan_cidr }}"
+  - port: 80
+    proto: tcp
+    source: "{{ lan_cidr }}"
+  - port: 443
+    proto: tcp
+    source: "{{ lan_cidr }}"
 
 sonarr_proxy_domain: sonarr.home.arpa
-sonarr_proxy_upstream: http://192.0.2.101:8989
+qbittorrent_proxy_domain: qbittorrent.home.arpa
+prowlarr_proxy_domain: prowlarr.home.arpa
