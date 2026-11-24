@@ -1,0 +1,84 @@
+---
+- name: Read the VM configuration
+  ansible.builtin.command: "pvesh get {{ guest_api }}/config --output-format json"
+  register: guest_config_result
+  changed_when: false
+  check_mode: false
+
+- name: Read the VM firewall options
+  ansible.builtin.command: "pvesh get {{ guest_api }}/firewall/options --output-format json"
+  register: guest_options_result
+  changed_when: false
+  check_mode: false
+
+- name: Read the VM firewall rules
+  ansible.builtin.command: "pvesh get {{ guest_api }}/firewall/rules --output-format json"
+  register: guest_rules_result
+  changed_when: false
+  check_mode: false
+
+- name: Check the VM identity and ownership of existing rules
+  ansible.builtin.assert:
+    that:
+      - guest_config.name == guest.name
+      - guest_config.net0 is defined
+      - (guest_config.keys() | select('match', '^net[0-9]+$') | list) == ['net0']
+      - current_comments | difference(managed_comments) | length == 0
+      - current_comments | unique(case_sensitive=true) | length == current_comments | length
+    fail_msg: "Check the network interfaces and any unmanaged or duplicate rules for VM {{ guest.vmid }}."
+  vars:
+    guest_config: "{{ guest_config_result.stdout | from_json }}"
+    current_comments: "{{ guest_rules_result.stdout | from_json | map(attribute='comment', default='') | list }}"
+    managed_comments: "{{ guest.rules | map(attribute='name') | map('regex_replace', '^', 'Ansible - ') | list }}"
+
+- name: Apply inbound allow rules
+  ansible.builtin.command:
+    argv: >-
+      {{ ['pvesh', 'set' if existing_rule else 'create', rule_api,
+          '--type', 'in', '--action', 'ACCEPT', '--enable', '1',
+          '--proto', rule.proto, '--dport', rule.port | string,
+          '--comment', 'Ansible - ' ~ rule.name]
+         + (['--source', rule.source] if rule.source is defined else
+            (['--delete', 'source'] if existing_rule.source is defined else [])) }}
+  # Proxmox prepends new rules, so update existing positions first.
+  loop: >-
+    {{ (guest.rules | selectattr('name', 'in', existing_names) | list)
+       + (guest.rules | rejectattr('name', 'in', existing_names) | list) }}
+  loop_control:
+    loop_var: rule
+    label: "{{ rule.name }}"
+  vars:
+    current_rules: "{{ guest_rules_result.stdout | from_json }}"
+    existing_names: "{{ current_rules | map(attribute='comment') | map('regex_replace', '^Ansible - ', '') | list }}"
+    existing_rule: "{{ current_rules | selectattr('comment', 'equalto', 'Ansible - ' ~ rule.name) | first | default({}) }}"
+    rules_api: "{{ guest_api }}/firewall/rules"
+    rule_api: "{{ rules_api ~ '/' ~ existing_rule.pos if existing_rule else rules_api }}"
+  when: >-
+    existing_rule.type | default('') != 'in' or
+    existing_rule.action | default('') != 'ACCEPT' or
+    not (existing_rule.enable | default(false) | bool) or
+    existing_rule.proto | default('') != rule.proto or
+    existing_rule.dport | default('') | string != rule.port | string or
+    existing_rule.source | default('') != rule.source | default('')
+
+- name: Enable guest firewall with default-deny inbound
+  ansible.builtin.command: >-
+    pvesh set {{ guest_api }}/firewall/options --enable 1 --policy_in DROP --policy_out ACCEPT
+  vars:
+    guest_options: "{{ guest_options_result.stdout | from_json }}"
+  when: >-
+    not (guest_options.enable | default(false) | bool) or
+    guest_options.policy_in | default('') != 'DROP' or
+    guest_options.policy_out | default('') != 'ACCEPT'
+
+- name: Enable firewall on the VM network interface
+  ansible.builtin.command:
+    argv:
+      - qm
+      - set
+      - "{{ guest.vmid | string }}"
+      - --net0
+      - "{{ guest_net0 | regex_replace(',firewall=[^,]*', '') }},firewall=1"
+  vars:
+    guest_net0: "{{ (guest_config_result.stdout | from_json).net0 }}"
+  when: "'firewall=1' not in guest_net0.split(',')"

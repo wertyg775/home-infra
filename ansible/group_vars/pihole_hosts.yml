@@ -4,6 +4,27 @@ common_packages:
   - gnupg
   - unattended-upgrades
 
+manage_firewall: true
+
+# Set to the fixed LAN IP of the device that should reach the web dashboard.
+pihole_admin_ip: "192.0.2.10"
+pihole_lan_firewall_rules:
+  - port: 22
+    proto: tcp
+    source: "{{ lan_cidr }}"
+  - port: 53
+    proto: tcp
+    source: "{{ lan_cidr }}"
+  - port: 53
+    proto: udp
+    source: "{{ lan_cidr }}"
+pihole_admin_firewall_rule:
+  port: "80,443"
+  proto: tcp
+  source: "{{ pihole_admin_ip }}"
+common_firewall_rules: >-
+  {{ pihole_lan_firewall_rules + ([pihole_admin_firewall_rule] if pihole_admin_ip else []) }}
+
 # Upstream resolvers for the initial installation; after installation, manage
 # them in Pi-hole. Keep the admin password in Ansible Vault.
 # pihole_upstreams: [1.1.1.1, 1.0.0.1]

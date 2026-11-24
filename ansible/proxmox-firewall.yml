@@ -1,0 +1,53 @@
+---
+- name: Configure the Docker VM firewalls in Proxmox
+  hosts: proxmox_hosts
+  gather_facts: false
+  become: false
+  vars:
+    proxmox_firewall_enable_datacenter: false
+    datacenter_firewall_enabled: "{{ (datacenter_firewall_result.stdout | from_json).enable | default(false) | bool }}"
+    node_nftables_enabled: "{{ (node_firewall_result.stdout | from_json).nftables | default(false) | bool }}"
+
+  tasks:
+    - name: Read datacenter firewall options
+      ansible.builtin.command: pvesh get /cluster/firewall/options --output-format json
+      register: datacenter_firewall_result
+      changed_when: false
+      check_mode: false
+
+    - name: Read node firewall options
+      ansible.builtin.command: "pvesh get /nodes/{{ inventory_hostname }}/firewall/options --output-format json"
+      register: node_firewall_result
+      changed_when: false
+      check_mode: false
+
+    - name: Check that the backend switch is staged separately
+      ansible.builtin.assert:
+        that:
+          - not (datacenter_firewall_enabled | bool)
+          - not (proxmox_firewall_enable_datacenter | bool)
+        fail_msg: >-
+          Switch to nftables with datacenter enforcement off. Run this playbook
+          without the activation flag, then stop and start the running guests
+          on this node before enabling enforcement.
+      when: not (node_nftables_enabled | bool)
+
+    - name: Configure each Docker VM firewall
+      ansible.builtin.include_tasks: tasks/proxmox-guest-firewall.yml
+      loop: "{{ proxmox_firewall_guests }}"
+      loop_control:
+        loop_var: guest
+        label: "{{ guest.vmid }} {{ guest.name }}"
+      vars:
+        guest_api: "/nodes/{{ inventory_hostname }}/qemu/{{ guest.vmid }}"
+
+    - name: Select the nftables backend on the Proxmox node
+      ansible.builtin.command: "pvesh set /nodes/{{ inventory_hostname }}/firewall/options --nftables 1"
+      when: not (node_nftables_enabled | bool)
+
+    - name: Enable datacenter enforcement with host input and output allowed
+      ansible.builtin.command: >-
+        pvesh set /cluster/firewall/options --policy_in ACCEPT --policy_out ACCEPT --enable 1
+      when:
+        - proxmox_firewall_enable_datacenter | bool
+        - not (datacenter_firewall_enabled | bool)

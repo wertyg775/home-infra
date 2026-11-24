@@ -1,0 +1,19 @@
+---
+proxmox_firewall_admin_network: 192.0.2.0/24
+proxmox_firewall_proxy_ip: "{{ hostvars['proxy'].ansible_host }}"
+
+proxmox_firewall_guests:
+  - vmid: 102
+    name: secrets
+    rules:
+      - { name: SSH, proto: tcp, port: 22, source: "{{ proxmox_firewall_admin_network }}" }
+      - { name: Vaultwarden, proto: tcp, port: "{{ vaultwarden_backend_port }}", source: "{{ proxmox_firewall_proxy_ip }}" }
+  - vmid: 101
+    name: containers
+    rules:
+      - { name: SSH, proto: tcp, port: 22, source: "{{ proxmox_firewall_admin_network }}" }
+      - { name: Sonarr, proto: tcp, port: "{{ hostvars['containers'].sonarr_port }}", source: "{{ proxmox_firewall_proxy_ip }}" }
+      - { name: qBittorrent UI, proto: tcp, port: "{{ hostvars['containers'].qbittorrent_port }}", source: "{{ proxmox_firewall_proxy_ip }}" }
+      - { name: Prowlarr, proto: tcp, port: "{{ hostvars['containers'].prowlarr_port }}", source: "{{ proxmox_firewall_proxy_ip }}" }
+      - { name: qBittorrent TCP peers, proto: tcp, port: 6881 }
+      - { name: qBittorrent UDP peers, proto: udp, port: 6881 }

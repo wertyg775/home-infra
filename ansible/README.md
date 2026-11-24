@@ -7,8 +7,8 @@ Configures homelab VMs over SSH from this workstation.
 | VM | Role |
 |---|---|
 | 192.0.2.101 | VM for hosting docker containers  |
-| 192.0.2.102 | Vaultwarden (configuration required) |
-| 192.0.2.103 | Nginx reverse proxy |
+| 192.0.2.102 | Vaultwarden |
+| 192.0.2.103 | Nginx reverse proxy LXC |
 | 192.0.2.104 | Pi-hole LXC |
 
 ## Roles (tasks)
@@ -165,6 +165,33 @@ firewall; Docker-published ports may bypass UFW. Change
 `vaultwarden_backend_port` and `vaultwarden_https_port` in the shared settings
 if needed.
 
+## Configure the Docker VM firewalls in Proxmox
+
+`proxmox-firewall.yml` uses the Proxmox SSH connection to configure VM `102`
+(Vaultwarden) and VM `101` (Arr). Their rules are in
+`group_vars/proxmox_hosts.yml`. Both allow SSH from the LAN and their web
+backends from Nginx. The Arr VM also allows qBittorrent peer port `6881` over
+TCP and UDP. Each VM has an inbound `DROP` policy.
+
+```bash
+ansible-playbook proxmox-firewall.yml --check
+ansible-playbook proxmox-firewall.yml
+```
+
+With datacenter enforcement off, the second command stages the guest rules
+and selects the nftables backend on `pve1`. After switching backends, stop
+and start the running VMs and containers on the node so Proxmox recreates
+their virtual network interfaces. Review the other node and guest policies,
+then enable datacenter enforcement with host input and output accepted:
+
+```bash
+ansible-playbook proxmox-firewall.yml -e proxmox_firewall_enable_datacenter=true
+```
+
+Verify fresh SSH connections to the Proxmox host and both VMs. Check that the
+sites still work through Nginx and that a LAN client cannot reach the published
+web ports directly. Inspect the active rules with `nft list ruleset` on `pve1`.
+
 ## Configure and run Pi-hole
 
 `pihole.yml` installs [Pi-hole](https://docs.pi-hole.net/main/basic-install/)
@@ -187,13 +214,21 @@ Add a nonempty, single-line password to the Vault file:
 pihole_admin_password: "YOUR_PASSWORD"
 ```
 
-Verify that TCP and UDP port 53 and TCP ports 80 and 443 are free on the LXC,
-and restrict access to trusted networks with a firewall. Then run:
+Verify that TCP and UDP port 53 and TCP ports 80 and 443 are free on the LXC.
+Set `pihole_admin_ip` in `group_vars/pihole_hosts.yml` to your admin device's
+fixed LAN IP to allow it to reach the web dashboard. With that variable empty,
+the common role adds only SSH and DNS rules for the LAN. Then run:
 
 ```bash
 ansible pihole_hosts -m ping --ask-become-pass
 ansible-playbook pihole.yml -e @pihole-secrets.yml --ask-vault-pass --ask-become-pass
 ```
+
+On an existing Pi-hole, apply just the firewall with
+`ansible-playbook pihole.yml --tags firewall --ask-become-pass`. Review
+`sudo ufw status numbered` on the LXC and remove any older web rules that
+allow other sources. If the admin device's IP changes, remove its old UFW
+allow rule after applying the new one.
 
 Open `http://192.0.2.104/admin/` and test DNS, for example with
 `dig @192.0.2.104 example.com`. Once verified, configure clients or the
