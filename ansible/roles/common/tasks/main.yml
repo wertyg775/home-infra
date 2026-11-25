@@ -32,6 +32,14 @@
   when: manage_firewall | bool
   tags: [firewall]
   block:
+    - name: Check that lan_cidr is configured
+      ansible.builtin.assert:
+        that:
+          - lan_cidr | default('') | trim | length > 0
+        fail_msg: >-
+          HOMELAB_LAN_CIDR (lan_cidr) must be set before enabling the firewall.
+          Run `source scripts/env.sh` from the repository root first.
+
     - name: Install ufw
       ansible.builtin.apt:
         name: ufw

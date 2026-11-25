@@ -9,7 +9,7 @@ common_packages:
   - unattended-upgrades
 
 manage_firewall: false
-lan_cidr: 192.0.2.0/24
+lan_cidr: ""
 common_app_ports:
   - "{{ sonarr_port | default(8989) }}"
   - "{{ qbittorrent_port | default(8080) }}"

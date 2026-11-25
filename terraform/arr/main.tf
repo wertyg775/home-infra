@@ -10,7 +10,7 @@ terraform {
 }
 
 provider "proxmox" {
-  endpoint = "https://192.0.2.2:8006/"
+  endpoint = var.proxmox_endpoint
 }
 
 # Comment out after initial import of pve1/101 so future runs against empty
@@ -26,7 +26,7 @@ resource "proxmox_virtual_environment_vm" "arr" {
     ignore_changes  = [clone]
   }
 
-  node_name = "pve1"
+  node_name = var.proxmox_node
   vm_id     = 101
   name      = "containers"
 
@@ -64,11 +64,10 @@ resource "proxmox_virtual_environment_vm" "arr" {
     size         = 32
   }
 
-  # net0: virtio=BC:24:11:00:00:01,bridge=vmbr0,firewall=1
   network_device {
     bridge      = "vmbr0"
     model       = "virtio"
-    mac_address = "BC:24:11:00:00:01"
+    mac_address = var.arr_mac_address
     firewall    = true
   }
 
@@ -81,30 +80,27 @@ resource "proxmox_virtual_environment_vm" "arr" {
   }
 
   # ide2 cloud-init drive is created and managed by this block.
-  # ipconfig0: ip=192.0.2.101/24,gw=192.0.2.1
-  # nameserver: 192.0.2.104 1.1.1.1 
   initialization {
     datastore_id = "local-lvm"
     interface    = "ide2"
 
     dns {
-      servers = ["192.0.2.104", "1.1.1.1"]
+      servers = [var.pihole_ip, "1.1.1.1"]
     }
 
     ip_config {
       ipv4 {
-        address = "192.0.2.101/24"
-        gateway = "192.0.2.1"
+        address = "${var.arr_ip}/${var.lan_prefix_len}"
+        gateway = var.lan_gateway
       }
     }
 
     # TODO: On the existing VM 101, `terraform apply` updates Proxmox's
     # cloud-init `sshkeys`, but cloud-init will NOT prune old keys from
-    # `/home/admin/.ssh/authorized_keys` inside 192.0.2.101 — remove
-    # `workstation` (and `root@pve1` if unwanted) there manually.
+    # `~/.ssh/authorized_keys` inside the VM — remove stale keys manually.
     user_account {
-      username = "admin"
-      keys     = [trimspace(file(pathexpand("~/.ssh/container_vm.pub")))]
+      username = var.vm_username
+      keys     = [trimspace(file(pathexpand(var.arr_ssh_public_key_path)))]
     }
   }
 }

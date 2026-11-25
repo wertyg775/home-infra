@@ -1,5 +1,5 @@
 ---
-proxmox_firewall_admin_network: 192.0.2.0/24
+proxmox_firewall_admin_network: "{{ lan_cidr }}"
 proxmox_firewall_proxy_ip: "{{ hostvars['proxy'].ansible_host }}"
 
 proxmox_firewall_guests:

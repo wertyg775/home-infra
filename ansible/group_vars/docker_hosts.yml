@@ -1,10 +1,10 @@
 ---
 # ---- identity / runtime --------------------------------------------------
-timezone: UTC
+# timezone and lan_cidr come from group_vars/all/env.yml (.env).
 puid: 1000
 pgid: 1000
 docker_users:
-  - admin
+  - "{{ admin_user }}"
 
 # also set docker_repo_os below.
 docker_repo_os: debian
@@ -39,4 +39,3 @@ compose_pull: missing
 
 # ---- firewall (off by default so you cannot lock yourself out) -----------
 manage_firewall: false
-lan_cidr: 192.0.2.0/24

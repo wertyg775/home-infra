@@ -41,10 +41,25 @@ View the current directory tree, including untracked and hidden files but
 excluding Git's internal directory:
 
 ```bash
-cd /home/admin/homelab-infra
+cd ~/homelab-infra
 # Install once if the tree command is missing:
 sudo apt install tree
 tree -a -I .git
+```
+
+## Environment configuration
+
+Environment-specific values (usernames, LAN IPs, MAC addresses, SSH key paths,
+CA paths, timezone, and Tailscale IP) live in a gitignored `.env` file at the
+repository root rather than being hardcoded in tracked files.
+
+```bash
+cp .env.example .env
+# Edit .env with your host values, then load it before running Ansible or Terraform:
+source scripts/env.sh
+
+# Render networking/*.template files into local .conf files before deploying:
+./scripts/render-configs.sh
 ```
 
 Git can also list paths, without the tree drawing:
@@ -67,8 +82,8 @@ Untracked files appear in `tree` but not in these Git listings.
 | nextcloud/.env.example | Template for /opt/nextcloud/.env; never deploy placeholders |
 | nextcloud/zz-container.config.php | /srv/nextcloud-container/html/config/zz-container.config.php |
 | nginx/ | Custom files under /etc/nginx; enable the Nextcloud site with the symlink documented below |
-| networking/nftables.conf | /etc/nftables.conf |
-| networking/dnsmasq.d/ | /etc/dnsmasq.d/ |
+| networking/nftables.conf.template | Render via `scripts/render-configs.sh` to networking/nftables.conf, then copy to /etc/nftables.conf |
+| networking/dnsmasq.d/cloud-home-arpa.conf.template | Render via `scripts/render-configs.sh` to networking/dnsmasq.d/cloud-home-arpa.conf, then copy to /etc/dnsmasq.d/ |
 | networking/wifi-powersave-off.conf | /etc/NetworkManager/conf.d/wifi-powersave-off.conf |
 | ssh/ | Corresponding files under /etc/ssh |
 | apt/ | Corresponding sources and preferences under /etc/apt |

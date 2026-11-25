@@ -4,12 +4,16 @@ Configures homelab VMs over SSH from this workstation.
 
 ## Configured VMs
 
-| VM | Role |
-|---|---|
-| 192.0.2.101 | VM for hosting docker containers  |
-| 192.0.2.102 | Vaultwarden |
-| 192.0.2.103 | Nginx reverse proxy LXC |
-| 192.0.2.104 | Pi-hole LXC |
+Host IP addresses, SSH users, and key paths are loaded from the repository root
+`.env` file (see `../.env.example` and `group_vars/all/env.yml`).
+
+| Inventory host | `.env` variable | Role |
+|---|---|---|
+| `pve1` | `PROXMOX_HOST` | Proxmox VE host |
+| `containers` | `ARR_HOST` | VM for hosting docker containers |
+| `vaultwarden` | `VAULTWARDEN_HOST` | Vaultwarden |
+| `proxy` | `NGINX_PROXY_HOST` | Nginx reverse proxy LXC |
+| `pihole` | `PIHOLE_HOST` | Pi-hole LXC |
 
 ## Roles (tasks)
 
@@ -45,7 +49,13 @@ Configure VM with SSH key via cloud-init.
 
 ## Configure
 
-1. `inventory/hosts.yml` :  set ansible_host, user and ssh private key filepath.
+1. Copy `../.env.example` to `../.env` and set your host IPs, `HOMELAB_USER`,
+   SSH key paths, LAN CIDR, and CA paths.
+2. Load `.env` into your shell before running Ansible:
+
+```bash
+source ../scripts/env.sh
+```
 
 ## Run
 
@@ -91,7 +101,7 @@ Pin a version in `group_vars` for a fixed release
 
 `nginx.yml` enables HTTP sites for `sonarr.home.arpa`, `qbittorrent.home.arpa`,
 and `prowlarr.home.arpa` on the Nginx proxy. Point those DNS records at
-`192.0.2.103`. The hostnames are configured in `group_vars/nginx_proxy.yml`,
+`NGINX_PROXY_HOST`. The hostnames are configured in `group_vars/nginx_proxy.yml`,
 and the upstream ports come from the media VM's inventory variables.
 
 ```bash
@@ -100,7 +110,7 @@ ansible-playbook nginx.yml --tags nginx
 
 ### Enable the proxy firewall
 
-The `common` role allows TCP ports `22`, `80`, and `443` from `192.0.2.0/24`
+The `common` role allows TCP ports `22`, `80`, and `443` from `HOMELAB_LAN_CIDR`
 and sets UFW's default inbound policy to deny. The rules are in
 `group_vars/nginx_proxy.yml`. Run the firewall tasks from a LAN workstation
 with SSH access to the proxy.
@@ -115,24 +125,26 @@ adds its rules alongside existing ones.
 
 ## Configure and run Vaultwarden
 
-The playbook configures the existing Vaultwarden VM at `192.0.2.102` and the
-Nginx proxy at `192.0.2.103`. It does not create either host or alter existing
+The playbook configures the existing Vaultwarden VM (`VAULTWARDEN_HOST`) and the
+Nginx proxy (`NGINX_PROXY_HOST`). It does not create either host or alter existing
 proxy sites. The proxy provides HTTPS and forwards requests to Vaultwarden.
 
-1. Set the SSH user and key in `inventory/hosts.yml`. Check `docker_repo_os` and
-   `docker_arch` in `group_vars/vaultwarden_hosts.yml` against the app VM.
-2. In `group_vars/all/vaultwarden.yml`, set the root CA certificate and signing
-   key paths on the control machine. Ansible needs read access to both PEM
-   files. Set `vaultwarden_domain` if needed; its DNS record must point to the
-   Nginx proxy (`192.0.2.103`). Install the root CA certificate in the trust
-   store of each client device. The role signs directly with a root CA.
+1. Set the SSH user, host IPs, and key paths in `../.env` and run
+   `source ../scripts/env.sh`. Check `docker_repo_os` and `docker_arch` in
+   `group_vars/vaultwarden_hosts.yml` against the app VM.
+2. Set `VAULTWARDEN_CA_CERT` and `VAULTWARDEN_CA_KEY` in `../.env` to the root
+   CA certificate and signing key paths on the control machine. Ansible needs
+   read access to both PEM files. Set `vaultwarden_domain` if needed; its DNS
+   record must point to the Nginx proxy (`NGINX_PROXY_HOST`). Install the root
+   CA certificate in the trust store of each client device. The role signs
+   directly with a root CA.
 3. Install the collections from `requirements.yml` and ensure the Ansible
    control machine's Python has `cryptography` installed. The proxy role
    installs `python3-cryptography` on the proxy VM. If the CA key has a
    passphrase, store `vaultwarden_ca_key_passphrase` in an encrypted Ansible
    Vault file; use `-e @vaultwarden-secrets.yml --ask-vault-pass` below.
 4. From the `ansible` directory, run the two plays. Run them separately if the
-   two `admin` accounts have different sudo passwords:
+   two target hosts have different sudo passwords:
 
    ```bash
    ansible-playbook vaultwarden.yml --limit vaultwarden --ask-become-pass
@@ -196,10 +208,10 @@ web ports directly. Inspect the active rules with `nft list ruleset` on `pve1`.
 
 `pihole.yml` installs [Pi-hole](https://docs.pi-hole.net/main/basic-install/)
 directly in the existing Debian LXC in `pihole_hosts`. The LXC needs a static
-IP and working network access. The inventory and Terraform configuration use
-`192.0.2.104`. If necessary, first run `ansible-playbook bootstrap-pihole.yml`
-to create the SSH user; this uses the Proxmox host and container ID in
-`pihole_bootstrap`. The bootstrap password is also the user's sudo password.
+IP (`PIHOLE_HOST` in `../.env`) and working network access. If necessary, first
+run `ansible-playbook bootstrap-pihole.yml` to create the SSH user; this uses
+the Proxmox host and container ID in `pihole_bootstrap`. The bootstrap password
+is also the user's sudo password.
 
 Create an encrypted Vault file for the admin password:
 
@@ -215,7 +227,7 @@ pihole_admin_password: "YOUR_PASSWORD"
 ```
 
 Verify that TCP and UDP port 53 and TCP ports 80 and 443 are free on the LXC.
-Set `pihole_admin_ip` in `group_vars/pihole_hosts.yml` to your admin device's
+Set `HOMELAB_ADMIN_IP` in `../.env` (`pihole_admin_ip`) to your admin device's
 fixed LAN IP to allow it to reach the web dashboard. With that variable empty,
 the common role adds only SSH and DNS rules for the LAN. Then run:
 
@@ -230,8 +242,8 @@ On an existing Pi-hole, apply just the firewall with
 allow other sources. If the admin device's IP changes, remove its old UFW
 allow rule after applying the new one.
 
-Open `http://192.0.2.104/admin/` and test DNS, for example with
-`dig @192.0.2.104 example.com`. Once verified, configure clients or the
+Open `http://<PIHOLE_HOST>/admin/` and test DNS, for example with
+`dig @<PIHOLE_HOST> example.com`. Once verified, configure clients or the
 router's DHCP settings to use that address for DNS. Initial upstreams are
 Cloudflare (`1.1.1.1` and `1.0.0.1`); customize `pihole_upstreams` in group
 vars before installation, then manage upstreams in Pi-hole. Pi-hole does not

@@ -2,6 +2,8 @@
 .env
 .env.*
 !.env.example
+.vault_pass*
+vault_pass*
 secrets/
 private/
 config.php
@@ -23,6 +25,10 @@ backups/
 *.log
 .DS_Store
 .venv
+
+# Rendered environment-specific configs (generated from *.template via scripts/render-configs.sh)
+networking/dnsmasq.d/cloud-home-arpa.conf
+networking/nftables.conf
 
 # Terraform local state, secrets, plans, and downloaded providers
 .terraform/

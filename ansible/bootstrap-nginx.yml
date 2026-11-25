@@ -11,6 +11,15 @@
       confirm: true
 
   tasks:
+    - name: Check required environment variables
+      ansible.builtin.assert:
+        that:
+          - admin_user | default('') | trim | length > 0
+          - nginx_proxy_ssh_key | default('') | trim | length > 0
+        fail_msg: >-
+          HOMELAB_USER and NGINX_PROXY_SSH_KEY must be set.
+          Run `source scripts/env.sh` from the repository root first.
+
     - name: Install SSH and sudo
       ansible.builtin.apt:
         name:
@@ -19,23 +28,23 @@
         state: present
         update_cache: true
 
-    - name: Create admin
+    - name: Create admin user
       ansible.builtin.user:
-        name: admin
+        name: "{{ admin_user }}"
         groups: sudo
         append: true
         shell: /bin/bash
 
-    - name: Set admin password
+    - name: Set admin user password
       ansible.builtin.command:
         cmd: chpasswd
-        stdin: "admin:{{ admin_password }}"
+        stdin: "{{ admin_user }}:{{ admin_password }}"
       no_log: true
 
     - name: Install workstation public key
       ansible.posix.authorized_key:
-        user: admin
-        key: "{{ lookup('ansible.builtin.file', '/home/admin/.ssh/homelab_guest.pub') }}"
+        user: "{{ admin_user }}"
+        key: "{{ lookup('ansible.builtin.file', nginx_proxy_ssh_key ~ '.pub') }}"
 
     - name: Start SSH
       ansible.builtin.service:

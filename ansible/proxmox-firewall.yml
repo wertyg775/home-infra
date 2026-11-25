@@ -9,6 +9,14 @@
     node_nftables_enabled: "{{ (node_firewall_result.stdout | from_json).nftables | default(false) | bool }}"
 
   tasks:
+    - name: Check that proxmox_firewall_admin_network is configured
+      ansible.builtin.assert:
+        that:
+          - proxmox_firewall_admin_network | default('') | trim | length > 0
+        fail_msg: >-
+          HOMELAB_LAN_CIDR (proxmox_firewall_admin_network) must be set.
+          Run `source scripts/env.sh` from the repository root first.
+
     - name: Read datacenter firewall options
       ansible.builtin.command: pvesh get /cluster/firewall/options --output-format json
       register: datacenter_firewall_result

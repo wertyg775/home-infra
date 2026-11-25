@@ -1,0 +1,11 @@
+# Listen only on this server's Tailscale interface.
+listen-address=${TAILSCALE_IP}
+bind-dynamic
+
+# Resolve private hostname to Tailscale address
+local=/home.arpa/
+host-record=cloud.home.arpa,${TAILSCALE_IP}
+
+# Forward other queries through the LAN gateway resolver
+no-resolv
+server=${HOMELAB_LAN_GATEWAY}

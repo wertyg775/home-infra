@@ -6,8 +6,8 @@ common_packages:
 
 manage_firewall: true
 
-# Set to the fixed LAN IP of the device that should reach the web dashboard.
-pihole_admin_ip: "192.0.2.10"
+# Fixed LAN IP of the device allowed to reach the web dashboard (from .env).
+pihole_admin_ip: "{{ lookup('ansible.builtin.env', 'HOMELAB_ADMIN_IP') }}"
 pihole_lan_firewall_rules:
   - port: 22
     proto: tcp

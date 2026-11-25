@@ -10,7 +10,7 @@ terraform {
 }
 
 provider "proxmox" {
-  endpoint = "https://192.0.2.2:8006/"
+  endpoint = var.proxmox_endpoint
 }
 
 # Uncomment only if target VM exists AND no .tfstate
@@ -26,7 +26,7 @@ resource "proxmox_virtual_environment_vm" "vaultwarden" {
     ignore_changes  = [clone]
   }
 
-  node_name = "pve1"
+  node_name = var.proxmox_node
   vm_id     = 102
   name      = "secrets"
 
@@ -64,11 +64,10 @@ resource "proxmox_virtual_environment_vm" "vaultwarden" {
     size         = 10
   }
 
-  # net0: virtio=BC:24:11:00:00:02,bridge=vmbr0,firewall=1
   network_device {
     bridge      = "vmbr0"
     model       = "virtio"
-    mac_address = "BC:24:11:00:00:02"
+    mac_address = var.vaultwarden_mac_address
     firewall    = true
   }
 
@@ -81,22 +80,20 @@ resource "proxmox_virtual_environment_vm" "vaultwarden" {
   }
 
   # ide2 cloud-init drive is created and managed by this block.
-  # ipconfig0: ip=192.0.2.102/24,gw=192.0.2.1
-  # ciuser: admin  +  sshkeys: homelab_guest
   initialization {
     datastore_id = "local-lvm"
     interface    = "ide2"
 
     ip_config {
       ipv4 {
-        address = "192.0.2.102/24"
-        gateway = "192.0.2.1"
+        address = "${var.vaultwarden_ip}/${var.lan_prefix_len}"
+        gateway = var.lan_gateway
       }
     }
 
     user_account {
-      username = "admin"
-      keys     = [trimspace(file(pathexpand("~/.ssh/homelab_guest.pub")))]
+      username = var.vm_username
+      keys     = [trimspace(file(pathexpand(var.vaultwarden_ssh_public_key_path)))]
     }
   }
 }

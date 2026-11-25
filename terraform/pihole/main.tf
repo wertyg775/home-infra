@@ -10,11 +10,11 @@ terraform {
 }
 
 provider "proxmox" {
-  endpoint = "https://192.0.2.2:8006/"
+  endpoint = var.proxmox_endpoint
 }
 
 resource "proxmox_virtual_environment_container" "pihole" {
-  node_name = "pve1"
+  node_name = var.proxmox_node
   vm_id     = 104
 
   unprivileged = true
@@ -48,8 +48,8 @@ resource "proxmox_virtual_environment_container" "pihole" {
 
     ip_config {
       ipv4 {
-        address = "192.0.2.104/24"
-        gateway = "192.0.2.1"
+        address = "${var.pihole_ip}/${var.lan_prefix_len}"
+        gateway = var.lan_gateway
       }
     }
   }

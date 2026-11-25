@@ -8,7 +8,7 @@ table inet filter {
 		ct state established,related accept
 		iif "lo" accept
 		ip protocol icmp accept
-		ip saddr 192.0.2.0/24 tcp dport 22 accept
+		ip saddr ${HOMELAB_LAN_CIDR} tcp dport 22 accept
 		iifname "tailscale0" tcp dport { 22, 53, 80, 443 } accept
 		iifname "tailscale0" udp dport 53 accept
 		counter drop
