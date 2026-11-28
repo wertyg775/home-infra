@@ -20,6 +20,12 @@ resource "proxmox_virtual_environment_container" "pihole" {
   unprivileged = true
 
   start_on_boot = true
+  
+  startup {
+    order    = 1
+    up_delay = 15
+    down_delay = 30
+  }
 
   cpu {
     cores = 1

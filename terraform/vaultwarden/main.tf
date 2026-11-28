@@ -37,6 +37,12 @@ resource "proxmox_virtual_environment_vm" "vaultwarden" {
   on_boot = true
   started = true
 
+  startup {
+    order = 2
+    up_delay = 15
+    down_delay = 30
+  }
+
   scsi_hardware = "virtio-scsi-single"
   boot_order    = ["scsi0"]
 
